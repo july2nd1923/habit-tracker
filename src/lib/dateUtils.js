@@ -26,3 +26,14 @@ export function toDateStr(year, month, day) {
 export function formatMonthLabel(year, month) {
   return `${year}년 ${month + 1}월`
 }
+
+// 습관이 특정 연/월 화면에 보여야 하는지 판단
+// (보관되지 않았다면 항상 표시, 보관됐다면 보관한 달까지만 표시)
+export function isHabitVisibleInMonth(habit, year, month) {
+  if (!habit.archived) return true
+  if (!habit.archived_at) return true
+  const [ay, am] = habit.archived_at.split('-').map(Number)
+  if (year < ay) return true
+  if (year > ay) return false
+  return month + 1 <= am
+}
