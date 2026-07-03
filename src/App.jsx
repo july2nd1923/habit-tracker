@@ -1,5 +1,6 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { supabase } from './supabaseClient'
+import { isHabitVisibleInMonth } from './lib/dateUtils'
 import Login from './components/Login'
 import BottomNav from './components/BottomNav'
 import HomePage from './components/HomePage'
@@ -38,7 +39,6 @@ export default function App() {
     const { data } = await supabase
       .from('habits')
       .select('*')
-      .eq('archived', false)
       .order('created_at', { ascending: true })
     setHabits(data || [])
   }, [])
@@ -99,6 +99,21 @@ export default function App() {
     loadHabits()
   }
 
+  async function handleArchiveHabit(id) {
+    const todayStr = today.toISOString().slice(0, 10)
+    setHabits((prev) =>
+      prev.map((h) => (h.id === id ? { ...h, archived: true, archived_at: todayStr } : h))
+    )
+    await supabase.from('habits').update({ archived: true, archived_at: todayStr }).eq('id', id)
+  }
+
+  async function handleUnarchiveHabit(id) {
+    setHabits((prev) =>
+      prev.map((h) => (h.id === id ? { ...h, archived: false, archived_at: null } : h))
+    )
+    await supabase.from('habits').update({ archived: false, archived_at: null }).eq('id', id)
+  }
+
   async function handleToggle(habit, dateStr, isDone) {
     // optimistic update
     setLogsByHabit((prev) => {
@@ -120,6 +135,11 @@ export default function App() {
     setHabits((prev) => prev.map((h) => (h.id === habit.id ? { ...h, visibility: next } : h)))
     await supabase.from('habits').update({ visibility: next }).eq('id', habit.id)
   }
+
+  const visibleHabits = useMemo(
+    () => habits.filter((h) => isHabitVisibleInMonth(h, year, month)),
+    [habits, year, month]
+  )
 
   function goPrevMonth() {
     if (month === 0) {
@@ -151,7 +171,7 @@ export default function App() {
     <div className="min-h-screen">
       {tab === 'home' && (
         <HomePage
-          habits={habits}
+          habits={visibleHabits}
           logsByHabit={logsByHabit}
           year={year}
           month={month}
@@ -179,6 +199,8 @@ export default function App() {
         <SettingsPage
           habits={habits}
           onDeleteHabit={handleDeleteHabit}
+          onArchiveHabit={handleArchiveHabit}
+          onUnarchiveHabit={handleUnarchiveHabit}
           userEmail={session.user.email}
         />
       )}
