@@ -1,4 +1,4 @@
-export default function BottomNav({ tab, setTab, onLogout }) {
+export default function BottomNav({ tab, setTab, onLogout, hasUnread }) {
   const items = [
     { key: 'home', label: '홈', icon: HomeIcon },
     { key: 'notes', label: '메모', icon: NoteIcon },
@@ -13,10 +13,13 @@ export default function BottomNav({ tab, setTab, onLogout }) {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition ${
+            className={`relative flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl transition ${
               tab === key ? 'text-ink' : 'text-ink/35'
             }`}
           >
+            {key === 'friends' && hasUnread && (
+              <span className="absolute top-1 right-3 w-2 h-2 rounded-full bg-rose-400" />
+            )}
             <Icon active={tab === key} />
             <span className="text-[11px]">{label}</span>
           </button>

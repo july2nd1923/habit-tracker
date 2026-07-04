@@ -1,37 +1,156 @@
-import { useMemo } from 'react'
-import { daysInMonth, toDateStr } from '../lib/dateUtils'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import confetti from 'canvas-confetti'
+import { daysInMonth, toDateStr, computeStreakWithRest, computeMonthStats, yearMonthKey } from '../lib/dateUtils'
 import { supabase } from '../supabaseClient'
 
-export default function HabitCard({ habit, logs, year, month, today, onToggle, onOpenNote, onToggleVisibility }) {
+export default function HabitCard({ habit, logs, pauses, year, month, today, onToggle, onOpenNote, onToggleVisibility, onRefreshHabits }) {
   const total = daysInMonth(year, month)
-  const isCurrentMonth =
-    today.getFullYear() === year && today.getMonth() === month
-  const elapsedDays = isCurrentMonth ? today.getDate() : total
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month
 
-  const completedSet = useMemo(() => new Set(logs), [logs])
+  const doneDates = logs?.done || []
+  const restDates = logs?.rest || []
+  const doneSet = useMemo(() => new Set(doneDates), [doneDates])
+  const restSet = useMemo(() => new Set(restDates), [restDates])
 
-  const completedThisMonth = useMemo(() => {
-    let c = 0
-    for (let d = 1; d <= elapsedDays; d++) {
-      if (completedSet.has(toDateStr(year, month, d))) c++
-    }
-    return c
-  }, [completedSet, elapsedDays, year, month])
+  const stats = useMemo(
+    () => computeMonthStats(habit, doneDates, restDates, year, month, today, pauses),
+    [habit, doneDates, restDates, year, month, today, pauses]
+  )
+  const { completed: completedThisMonth, restCount, pausedCount, percent, startDay, elapsedDays, isFullMonth, pausedSet } = stats
 
-  const percent = elapsedDays > 0 ? Math.round((completedThisMonth / elapsedDays) * 100) : 0
+  const isPausedNow = useMemo(() => (pauses || []).some((p) => !p.end_date), [pauses])
 
   const days = Array.from({ length: total }, (_, i) => i + 1)
+
+  const streak = useMemo(
+    () => computeStreakWithRest(doneDates, restDates, year, month, today, startDay, pauses),
+    [doneDates, restDates, year, month, today, startDay, pauses]
+  )
+
+  // 이번 달 100% 달성 순간 축하 효과
+  const prevFullRef = useRef(isFullMonth)
+  useEffect(() => {
+    if (isCurrentMonth && isFullMonth && !prevFullRef.current) {
+      confetti({ particleCount: 90, spread: 75, origin: { y: 0.7 } })
+    }
+    prevFullRef.current = isFullMonth
+  }, [isFullMonth, isCurrentMonth])
+
+  // 챌린지 진행 상황 (파트너와 겹친 날 / 거절·종료 상태)
+  const [challengeInfo, setChallengeInfo] = useState(null)
+  useEffect(() => {
+    let cancelled = false
+    if (!habit.challenge_id) {
+      setChallengeInfo(null)
+      return
+    }
+    async function load() {
+      const { data: challenge } = await supabase
+        .from('challenges')
+        .select(
+          '*, creator:creator_id(display_name, friend_code), partner:partner_id(display_name, friend_code)'
+        )
+        .eq('id', habit.challenge_id)
+        .maybeSingle()
+      if (!challenge || cancelled) return
+      const iAmCreator = challenge.creator_habit_id === habit.id
+      const partnerProfile = iAmCreator ? challenge.partner : challenge.creator
+      const partnerName = partnerProfile?.display_name || partnerProfile?.friend_code || '상대'
+
+      if (challenge.status === 'declined') {
+        setChallengeInfo({ state: 'declined', partnerName, challengeId: challenge.id })
+        return
+      }
+      if (challenge.status === 'ended') {
+        setChallengeInfo({ state: 'ended', partnerName, challengeId: challenge.id })
+        return
+      }
+      const partnerHabitId = iAmCreator ? challenge.partner_habit_id : challenge.creator_habit_id
+      if (!partnerHabitId) {
+        setChallengeInfo({ state: 'pending', partnerName, challengeId: challenge.id })
+        return
+      }
+      const start = `${year}-${String(month + 1).padStart(2, '0')}-01`
+      const endDate = new Date(year, month + 1, 0).getDate()
+      const end = `${year}-${String(month + 1).padStart(2, '0')}-${String(endDate).padStart(2, '0')}`
+      const { data: partnerLogs } = await supabase
+        .from('habit_logs')
+        .select('log_date')
+        .eq('habit_id', partnerHabitId)
+        .eq('status', 'done')
+        .gte('log_date', start)
+        .lte('log_date', end)
+      if (cancelled) return
+      const partnerSet = new Set((partnerLogs || []).map((l) => l.log_date))
+      let overlap = 0
+      for (let d = startDay; d <= elapsedDays; d++) {
+        const ds = toDateStr(year, month, d)
+        if (doneSet.has(ds) && partnerSet.has(ds)) overlap++
+      }
+      setChallengeInfo({ state: 'active', overlap, partnerName, challengeId: challenge.id })
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [habit.challenge_id, habit.id, year, month, doneSet, startDay, elapsedDays])
+
+  async function convertToNormalHabit() {
+    await supabase.from('habits').update({ challenge_id: null }).eq('id', habit.id)
+    setChallengeInfo(null)
+    onRefreshHabits?.()
+  }
+
+  async function leaveChallenge() {
+    if (!confirm('챌린지를 그만할까요? 습관과 기록은 그대로 남고, 함께 보기만 종료돼요. 상대에게도 종료 안내가 표시돼요.')) return
+    await supabase.from('challenges').update({ status: 'ended' }).eq('id', challengeInfo.challengeId)
+    await supabase.from('habits').update({ challenge_id: null }).eq('id', habit.id)
+    setChallengeInfo(null)
+    onRefreshHabits?.()
+  }
+
+  // 친구들이 남긴 응원 (이번 달)
+  const [reactions, setReactions] = useState([])
+  useEffect(() => {
+    let cancelled = false
+    if (habit.visibility !== 'friends') {
+      setReactions([])
+      return
+    }
+    async function load() {
+      const { data } = await supabase
+        .from('habit_reactions')
+        .select('emoji, reactor:reactor_id(display_name, friend_code)')
+        .eq('habit_id', habit.id)
+        .eq('year_month', yearMonthKey(year, month))
+      if (!cancelled) setReactions(data || [])
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [habit.id, habit.visibility, year, month])
 
   return (
     <div className="bg-white rounded-xl2 shadow-soft border border-ink/5 p-4">
       <div className="flex items-start justify-between mb-3">
         <div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <span
               className="inline-block w-2.5 h-2.5 rounded-full"
               style={{ backgroundColor: habit.color }}
             />
             <h3 className="font-display text-base text-ink">{habit.title}</h3>
+            {habit.challenge_id && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#F3EFE8] text-ink/50">
+                🤝 챌린지
+              </span>
+            )}
+            {isPausedNow && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-[#F3EFE8] text-ink/50">
+                🌙 휴식중
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -71,34 +190,92 @@ export default function HabitCard({ habit, logs, year, month, today, onToggle, o
         </div>
       </div>
 
+      {isFullMonth && (
+        <div className="mb-3 text-center text-xs py-1.5 rounded-lg" style={{ backgroundColor: `${habit.color}30` }}>
+          🏆 이번 달 완주! 대단해요
+        </div>
+      )}
+
       <div className="grid grid-cols-7 gap-1.5">
         {days.map((d) => {
           const dateStr = toDateStr(year, month, d)
-          const done = completedSet.has(dateStr)
-          const isFuture =
-            isCurrentMonth && d > today.getDate()
+          const isDone = doneSet.has(dateStr)
+          const isRest = restSet.has(dateStr)
+          const isPausedDay = pausedSet.has(dateStr)
+          const status = isDone ? 'done' : isRest ? 'rest' : null
+          const isFuture = isCurrentMonth && d > today.getDate()
+          const isBeforeStart = d < startDay
+          const disabled = isFuture || isBeforeStart || isPausedDay
+          const cellStyle = isDone
+            ? { backgroundColor: habit.color, color: '#3E3A36' }
+            : isRest
+            ? { backgroundColor: '#fff', border: `2px solid ${habit.color}`, color: habit.color }
+            : { backgroundColor: '#F3EFE8', color: '#B7B0A5' }
           return (
             <button
               key={d}
-              disabled={isFuture}
-              onClick={() => onToggle(habit, dateStr, done)}
+              disabled={disabled}
+              onClick={() => onToggle(habit, dateStr, status)}
+              title={isPausedDay ? '휴식 기간' : isRest ? '쉬어가기' : undefined}
               className={`aspect-square rounded-md text-[11px] flex items-center justify-center transition ${
-                isFuture ? 'opacity-25 cursor-default' : 'hover:scale-105'
+                disabled ? 'opacity-25 cursor-default' : 'hover:scale-105'
               }`}
-              style={{
-                backgroundColor: done ? habit.color : '#F3EFE8',
-                color: done ? '#3E3A36' : '#B7B0A5',
-              }}
+              style={cellStyle}
             >
-              {d}
+              {isPausedDay ? '🌙' : isRest ? '💤' : d}
             </button>
           )
         })}
       </div>
 
-      <div className="mt-2.5 text-[11px] text-ink/40">
-        이번 달 {completedThisMonth}회 완료
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink/40">
+        <span>이번 달 {completedThisMonth}회 완료</span>
+        {streak >= 2 && <span>🔥 {streak}일 연속</span>}
+        {restCount > 0 && <span>💤 쉬어가기 {restCount}/5</span>}
+        {pausedCount > 0 && <span>🌙 휴식 {pausedCount}일</span>}
       </div>
+
+      {challengeInfo && (
+        <div className="mt-2 text-[11px] text-ink/45 flex items-center justify-between gap-2 flex-wrap">
+          {challengeInfo.state === 'pending' && (
+            <span>{challengeInfo.partnerName}님의 수락을 기다리는 중이에요</span>
+          )}
+          {challengeInfo.state === 'active' && (
+            <>
+              <span>{challengeInfo.partnerName}님과 이번 달 같이 한 날 {challengeInfo.overlap}일</span>
+              <button onClick={leaveChallenge} className="text-ink/30 hover:text-rose-400 transition underline underline-offset-2">
+                챌린지 그만하기
+              </button>
+            </>
+          )}
+          {challengeInfo.state === 'declined' && (
+            <>
+              <span>{challengeInfo.partnerName}님이 초대를 거절했어요</span>
+              <button onClick={convertToNormalHabit} className="text-ink/40 hover:text-ink transition underline underline-offset-2">
+                일반 습관으로 계속하기
+              </button>
+            </>
+          )}
+          {challengeInfo.state === 'ended' && (
+            <>
+              <span>{challengeInfo.partnerName}님이 챌린지를 종료했어요</span>
+              <button onClick={convertToNormalHabit} className="text-ink/40 hover:text-ink transition underline underline-offset-2">
+                일반 습관으로 계속하기
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {reactions.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {reactions.map((r, i) => (
+            <span key={i} className="text-xs bg-[#F3EFE8] rounded-full px-2 py-0.5" title={r.reactor?.display_name || r.reactor?.friend_code}>
+              {r.emoji}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
