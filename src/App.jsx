@@ -10,6 +10,7 @@ import FriendsPage from './components/FriendsPage'
 import AddHabitModal from './components/AddHabitModal'
 
 const today = new Date()
+const REST_LIMIT_PER_MONTH = 5 // 습관 하나당 한 달에 쉬어가기 가능 횟수
 
 export default function App() {
   const [session, setSession] = useState(undefined) // undefined = loading
@@ -17,6 +18,8 @@ export default function App() {
   const [tab, setTab] = useState('home')
   const [habits, setHabits] = useState([])
   const [logsByHabit, setLogsByHabit] = useState({})
+  const [pausesByHabit, setPausesByHabit] = useState({})
+  const [unreadByFriendship, setUnreadByFriendship] = useState({})
   const [year, setYear] = useState(today.getFullYear())
   const [month, setMonth] = useState(today.getMonth())
   const [showAdd, setShowAdd] = useState(false)
@@ -36,9 +39,13 @@ export default function App() {
   }, [])
 
   const loadHabits = useCallback(async () => {
+    const { data: userData } = await supabase.auth.getUser()
+    if (!userData?.user) return
     const { data } = await supabase
       .from('habits')
       .select('*')
+      .eq('user_id', userData.user.id)
+      .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true })
     setHabits(data || [])
   }, [])
@@ -53,18 +60,56 @@ export default function App() {
     const end = `${y}-${String(m + 1).padStart(2, '0')}-${String(endDate).padStart(2, '0')}`
     const { data } = await supabase
       .from('habit_logs')
-      .select('habit_id, log_date')
+      .select('habit_id, log_date, status')
       .in('habit_id', habitIds)
       .gte('log_date', start)
       .lte('log_date', end)
 
     const grouped = {}
     for (const row of data || []) {
-      if (!grouped[row.habit_id]) grouped[row.habit_id] = []
-      grouped[row.habit_id].push(row.log_date)
+      if (!grouped[row.habit_id]) grouped[row.habit_id] = { done: [], rest: [] }
+      if (row.status === 'rest') grouped[row.habit_id].rest.push(row.log_date)
+      else grouped[row.habit_id].done.push(row.log_date)
     }
     setLogsByHabit(grouped)
   }, [])
+
+  const loadPauses = useCallback(async (habitIds) => {
+    if (!habitIds.length) {
+      setPausesByHabit({})
+      return
+    }
+    const { data } = await supabase.from('habit_pauses').select('*').in('habit_id', habitIds)
+    const grouped = {}
+    for (const row of data || []) {
+      if (!grouped[row.habit_id]) grouped[row.habit_id] = []
+      grouped[row.habit_id].push(row)
+    }
+    setPausesByHabit(grouped)
+  }, [])
+
+  const loadUnread = useCallback(async () => {
+    if (!profile) return
+    const { data: fr } = await supabase
+      .from('friendships')
+      .select('id')
+      .eq('status', 'accepted')
+      .or(`requester_id.eq.${profile.id},addressee_id.eq.${profile.id}`)
+    const ids = (fr || []).map((f) => f.id)
+    if (!ids.length) {
+      setUnreadByFriendship({})
+      return
+    }
+    const { data } = await supabase
+      .from('friend_messages')
+      .select('friendship_id')
+      .in('friendship_id', ids)
+      .is('read_at', null)
+      .neq('sender_id', profile.id)
+    const map = {}
+    for (const r of data || []) map[r.friendship_id] = (map[r.friendship_id] || 0) + 1
+    setUnreadByFriendship(map)
+  }, [profile])
 
   useEffect(() => {
     if (session) {
@@ -75,20 +120,24 @@ export default function App() {
 
   useEffect(() => {
     if (habits.length >= 0 && session) {
-      loadLogs(
-        habits.map((h) => h.id),
-        year,
-        month
-      )
+      const ids = habits.map((h) => h.id)
+      loadLogs(ids, year, month)
+      loadPauses(ids)
     }
-  }, [habits, year, month, session, loadLogs])
+  }, [habits, year, month, session, loadLogs, loadPauses])
+
+  useEffect(() => {
+    if (profile) loadUnread()
+  }, [profile, tab, loadUnread])
 
   async function handleAddHabit({ title, color }) {
     const { data: userData } = await supabase.auth.getUser()
+    const maxOrder = habits.reduce((max, h) => Math.max(max, h.sort_order ?? 0), 0)
     await supabase.from('habits').insert({
       title,
       color,
       user_id: userData.user.id,
+      sort_order: maxOrder + 1,
     })
     setShowAdd(false)
     loadHabits()
@@ -114,19 +163,80 @@ export default function App() {
     await supabase.from('habits').update({ archived: false, archived_at: null }).eq('id', id)
   }
 
-  async function handleToggle(habit, dateStr, isDone) {
+  async function handleRenameHabit(id, newTitle) {
+    const trimmed = newTitle.trim()
+    if (!trimmed) return
+    setHabits((prev) => prev.map((h) => (h.id === id ? { ...h, title: trimmed } : h)))
+    await supabase.from('habits').update({ title: trimmed }).eq('id', id)
+  }
+
+  async function handleTogglePause(habit) {
+    const pauses = pausesByHabit[habit.id] || []
+    const activePause = pauses.find((p) => !p.end_date)
+    const todayStr = today.toISOString().slice(0, 10)
+    if (activePause) {
+      await supabase.from('habit_pauses').update({ end_date: todayStr }).eq('id', activePause.id)
+    } else {
+      await supabase.from('habit_pauses').insert({ habit_id: habit.id, start_date: todayStr })
+    }
+    loadPauses(habits.map((h) => h.id))
+  }
+
+  async function handleReorderHabit(id, direction) {
+    const active = habits.filter((h) => !h.archived)
+    const idx = active.findIndex((h) => h.id === id)
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (idx === -1 || swapIdx < 0 || swapIdx >= active.length) return
+
+    const reordered = [...active]
+    ;[reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]]
+
+    // 활성 습관들의 sort_order를 0,1,2... 순으로 다시 매김
+    const updates = reordered.map((h, i) => ({ id: h.id, sort_order: i }))
+
+    setHabits((prev) => {
+      const orderMap = Object.fromEntries(updates.map((u) => [u.id, u.sort_order]))
+      return prev
+        .map((h) => (orderMap[h.id] !== undefined ? { ...h, sort_order: orderMap[h.id] } : h))
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    })
+
+    await Promise.all(
+      updates.map((u) => supabase.from('habits').update({ sort_order: u.sort_order }).eq('id', u.id))
+    )
+  }
+
+  async function handleToggle(habit, dateStr, currentStatus) {
+    const cur = logsByHabit[habit.id] || { done: [], rest: [] }
+    let nextStatus
+    if (currentStatus === 'done') {
+      // 완료 -> 쉬어가기 (한도 안에서만)
+      nextStatus = cur.rest.length < REST_LIMIT_PER_MONTH ? 'rest' : null
+    } else if (currentStatus === 'rest') {
+      nextStatus = null
+    } else {
+      nextStatus = 'done'
+    }
+
     // optimistic update
     setLogsByHabit((prev) => {
-      const cur = prev[habit.id] || []
-      return {
-        ...prev,
-        [habit.id]: isDone ? cur.filter((d) => d !== dateStr) : [...cur, dateStr],
-      }
+      const p = prev[habit.id] || { done: [], rest: [] }
+      const done = p.done.filter((d) => d !== dateStr)
+      const rest = p.rest.filter((d) => d !== dateStr)
+      if (nextStatus === 'done') done.push(dateStr)
+      if (nextStatus === 'rest') rest.push(dateStr)
+      return { ...prev, [habit.id]: { done, rest } }
     })
-    if (isDone) {
+
+    if (nextStatus === null) {
       await supabase.from('habit_logs').delete().eq('habit_id', habit.id).eq('log_date', dateStr)
     } else {
-      await supabase.from('habit_logs').insert({ habit_id: habit.id, log_date: dateStr })
+      await supabase
+        .from('habit_logs')
+        .upsert(
+          { habit_id: habit.id, log_date: dateStr, status: nextStatus },
+          { onConflict: 'habit_id,log_date' }
+        )
     }
   }
 
@@ -172,7 +282,9 @@ export default function App() {
       {tab === 'home' && (
         <HomePage
           habits={visibleHabits}
+          allHabits={habits}
           logsByHabit={logsByHabit}
+          pausesByHabit={pausesByHabit}
           year={year}
           month={month}
           today={today}
@@ -185,6 +297,7 @@ export default function App() {
           }}
           onToggleVisibility={handleToggleVisibility}
           onAddClick={() => setShowAdd(true)}
+          onRefreshHabits={loadHabits}
         />
       )}
       {tab === 'notes' && (
@@ -194,18 +307,33 @@ export default function App() {
           onConsumeInitial={() => setNoteTargetId(null)}
         />
       )}
-      {tab === 'friends' && <FriendsPage profile={profile} today={today} />}
+      {tab === 'friends' && (
+        <FriendsPage
+          profile={profile}
+          today={today}
+          unreadByFriendship={unreadByFriendship}
+          onUnreadRefresh={loadUnread}
+        />
+      )}
       {tab === 'settings' && (
         <SettingsPage
           habits={habits}
+          pausesByHabit={pausesByHabit}
           onDeleteHabit={handleDeleteHabit}
           onArchiveHabit={handleArchiveHabit}
           onUnarchiveHabit={handleUnarchiveHabit}
+          onRenameHabit={handleRenameHabit}
+          onReorderHabit={handleReorderHabit}
+          onTogglePause={handleTogglePause}
           userEmail={session.user.email}
         />
       )}
 
-      <BottomNav tab={tab} setTab={setTab} />
+      <BottomNav
+        tab={tab}
+        setTab={setTab}
+        hasUnread={Object.values(unreadByFriendship).some((n) => n > 0)}
+      />
 
       {showAdd && <AddHabitModal onClose={() => setShowAdd(false)} onAdd={handleAddHabit} />}
     </div>
