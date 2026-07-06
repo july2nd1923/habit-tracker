@@ -119,9 +119,34 @@ git push -u origin main
 - **습관 댓글 (메시지 대체)**: 친구가 공개한 습관 아래 💬 댓글을 남길 수 있어요. 댓글은 그 달에 귀속돼요 (6월에 단 댓글은 6월 화면에서만 보임). 그 습관을 볼 수 있는 사람은 누구의 댓글이든 볼 수 있어요 — 내 친구 A가 단 댓글을, A와 친구가 아닌 내 친구 B도 볼 수 있어요. 내 습관에 달린 댓글은 내 카드에서도 보이고 답글도 달 수 있어요.
 - **메시지 기능 제거**: 댓글로 대체되어 기존 1:1 메시지는 없어졌어요.
 
+- **⏰ 타임테이블 탭**: 하단 "일정" 탭에서 하루 시간표를 만들 수 있어요. 상단 주간 날짜 띠로 날짜를 고르고(다음 주 계획도 미리 가능), + 버튼으로 블록 추가. 블록을 탭하면 취소선(완료), 시간이 지났는데 체크 안 한 블록은 흐려지고 빨간 점이 붙어요 (자동으로 줄 그어주진 않아요 — 기록의 정확성을 위해). **완전 개인용**이라 친구에게 절대 안 보여요.
+  - 일정 추가 시 이름을 직접 입력하면 **일반 일정**, 내 습관 중 하나를 선택하면 **🔗 습관 연동 일정**이 돼요.
+  - 습관 연동 일정을 체크하면 홈 화면의 그 습관도 그 날짜로 함께 체크돼요. 매일 다른 시간에 하는 습관도 그날그날 원하는 시간에 배치하면 돼요 (오늘 3시, 내일 5시 OK).
+
 ## 이미 배포한 앱에 반영하기
 
-1. **Supabase SQL Editor에서 `supabase/migration_fix.sql` 전체 실행** (★ 이것만 하면 저장 안 되던 버그도 해결)
+1. **Supabase SQL Editor에서 `supabase/migration_fix.sql` 전체 실행** (★ 저장 안 되던 버그 해결 포함). 타임테이블만 추가하는 경우엔 아래만 실행해도 돼요:
+
+```sql
+create table if not exists timetable_events (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  title text,
+  color text,
+  event_date date,
+  habit_id uuid references habits(id) on delete cascade,
+  start_time time not null,
+  end_time time,
+  completed boolean default false,
+  created_at timestamptz default now()
+);
+
+alter table timetable_events enable row level security;
+
+drop policy if exists "timetable: owner only" on timetable_events;
+create policy "timetable: owner only" on timetable_events
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+```
 2. GitHub에서 기존 `src` 폴더 삭제 → 이 zip의 `src` 폴더 업로드
 3. `package.json`도 이전에 교체 안 했다면 교체
 4. Commit → Vercel 자동 재배포
