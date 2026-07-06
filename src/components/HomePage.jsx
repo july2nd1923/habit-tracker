@@ -7,6 +7,7 @@ import YearHeatmap from './YearHeatmap'
 export default function HomePage({
   habits,
   allHabits,
+  myId,
   logsByHabit,
   pausesByHabit,
   year,
@@ -94,6 +95,7 @@ export default function HomePage({
               habit={h}
               logs={logsByHabit[h.id] || { done: [], rest: [] }}
               pauses={pausesByHabit[h.id] || []}
+              myId={myId}
               year={year}
               month={month}
               today={today}

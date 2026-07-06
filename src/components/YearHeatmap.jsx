@@ -146,7 +146,7 @@ function HabitYearGrid({ habit, logs, pauses, year, today }) {
                   const ds = toDateStr(year, m, d)
                   const cur = new Date(year, m, d)
                   const isFuture = cur > today
-                  const isBeforeCreation = createdDate && cur < new Date(createdDate.getFullYear(), createdDate.getMonth(), createdDate.getDate())
+                  const isBeforeCreation = createdDate && (year < createdDate.getFullYear() || (year === createdDate.getFullYear() && m < createdDate.getMonth()))
                   let bg = '#F3EFE8'
                   let border = 'none'
                   if (isFuture || isBeforeCreation) {

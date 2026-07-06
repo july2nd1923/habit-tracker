@@ -2,8 +2,29 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import confetti from 'canvas-confetti'
 import { daysInMonth, toDateStr, computeStreakWithRest, computeMonthStats, yearMonthKey } from '../lib/dateUtils'
 import { supabase } from '../supabaseClient'
+import HabitComments from './HabitComments'
 
-export default function HabitCard({ habit, logs, pauses, year, month, today, onToggle, onOpenNote, onToggleVisibility, onRefreshHabits }) {
+const collapsedStore = {
+  read() {
+    try { return JSON.parse(localStorage.getItem('collapsed_habits') || '{}') } catch { return {} }
+  },
+  write(map) {
+    try { localStorage.setItem('collapsed_habits', JSON.stringify(map)) } catch { /* ignore */ }
+  },
+}
+
+export default function HabitCard({ habit, logs, pauses, year, month, today, myId, onToggle, onOpenNote, onToggleVisibility, onRefreshHabits }) {
+  const [collapsed, setCollapsed] = useState(() => !!collapsedStore.read()[habit.id])
+  function toggleCollapsed() {
+    setCollapsed((c) => {
+      const next = !c
+      const map = collapsedStore.read()
+      if (next) map[habit.id] = true
+      else delete map[habit.id]
+      collapsedStore.write(map)
+      return next
+    })
+  }
   const total = daysInMonth(year, month)
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month
 
@@ -131,11 +152,53 @@ export default function HabitCard({ habit, logs, pauses, year, month, today, onT
     }
   }, [habit.id, habit.visibility, year, month])
 
+  // 오늘 날짜의 상태 (접힌 상태의 빠른 체크용)
+  const todayStr = toDateStr(today.getFullYear(), today.getMonth(), today.getDate())
+  const todayStatus = doneSet.has(todayStr) ? 'done' : restSet.has(todayStr) ? 'rest' : null
+  const todayPaused = pausedSet.has(todayStr)
+
+  if (collapsed) {
+    return (
+      <div className="bg-white rounded-xl2 shadow-soft border border-ink/5 px-4 py-3 flex items-center gap-2.5">
+        <button onClick={toggleCollapsed} className="text-ink/30 hover:text-ink transition shrink-0" title="펼치기">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+            <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: habit.color }} />
+        <span className="font-display text-sm text-ink flex-1 truncate">{habit.title}</span>
+        {streak >= 2 && <span className="text-[11px] text-ink/45 shrink-0">🔥{streak}</span>}
+        <span className="text-xs font-medium text-ink/60 shrink-0">{percent}%</span>
+        {isCurrentMonth && !todayPaused && (
+          <button
+            onClick={() => onToggle(habit, todayStr, todayStatus)}
+            className="w-7 h-7 rounded-md text-[11px] flex items-center justify-center transition hover:scale-105 shrink-0"
+            style={
+              todayStatus === 'done'
+                ? { backgroundColor: habit.color, color: '#3E3A36' }
+                : todayStatus === 'rest'
+                ? { backgroundColor: '#fff', border: `2px solid ${habit.color}`, color: habit.color }
+                : { backgroundColor: '#F3EFE8', color: '#B7B0A5' }
+            }
+            title="오늘 체크"
+          >
+            {todayStatus === 'rest' ? '💤' : todayStatus === 'done' ? '✓' : today.getDate()}
+          </button>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="bg-white rounded-xl2 shadow-soft border border-ink/5 p-4">
       <div className="flex items-start justify-between mb-3">
         <div>
           <div className="flex items-center gap-1.5 flex-wrap">
+            <button onClick={toggleCollapsed} className="text-ink/30 hover:text-ink transition -ml-1" title="접기">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
             <span
               className="inline-block w-2.5 h-2.5 rounded-full"
               style={{ backgroundColor: habit.color }}
@@ -275,6 +338,10 @@ export default function HabitCard({ habit, logs, pauses, year, month, today, onT
             </span>
           ))}
         </div>
+      )}
+
+      {habit.visibility === 'friends' && (
+        <HabitComments habitId={habit.id} year={year} month={month} myId={myId} />
       )}
     </div>
   )

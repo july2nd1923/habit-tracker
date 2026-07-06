@@ -2,10 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import { formatMonthLabel, computeStreak } from '../lib/dateUtils'
 import FriendHabitRow from './FriendHabitRow'
-import FriendChat from './FriendChat'
 import CreateChallengeModal from './CreateChallengeModal'
 
-export default function FriendsPage({ profile, today, unreadByFriendship = {}, onUnreadRefresh }) {
+export default function FriendsPage({ profile, today }) {
   const [code, setCode] = useState('')
   const [message, setMessage] = useState('')
   const [incoming, setIncoming] = useState([])
@@ -204,14 +203,11 @@ export default function FriendsPage({ profile, today, unreadByFriendship = {}, o
         onBack={() => {
           setSelectedFriend(null)
           loadFriendships()
-          onUnreadRefresh?.()
         }}
-        onRead={onUnreadRefresh}
         onUnfriend={async () => {
           await supabase.from('friendships').delete().eq('id', selectedFriend.friendshipId)
           setSelectedFriend(null)
           loadFriendships()
-          onUnreadRefresh?.()
         }}
       />
     )
@@ -330,11 +326,6 @@ export default function FriendsPage({ profile, today, unreadByFriendship = {}, o
                 {(f.display_name || f.friend_code || '?')[0]}
               </span>
               <span className="font-display text-sm text-ink flex-1">{f.display_name || f.friend_code}</span>
-              {unreadByFriendship[f.friendshipId] > 0 && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-400 text-white">
-                  {unreadByFriendship[f.friendshipId]}
-                </span>
-              )}
               {f.streak >= 2 && <span className="text-xs text-ink/50">🔥 {f.streak}일</span>}
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3E3A36" strokeOpacity="0.3" strokeWidth="2">
                 <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
@@ -347,7 +338,7 @@ export default function FriendsPage({ profile, today, unreadByFriendship = {}, o
   )
 }
 
-function FriendDetail({ friend, myId, today, onBack, onRead, onUnfriend }) {
+function FriendDetail({ friend, myId, today, onBack, onUnfriend }) {
   const [habits, setHabits] = useState([])
   const [logsByHabit, setLogsByHabit] = useState({})
   const [pausesByHabit, setPausesByHabit] = useState({})
@@ -521,18 +512,11 @@ function FriendDetail({ friend, myId, today, onBack, onRead, onUnfriend }) {
         </div>
       )}
 
-      <FriendChat
-        friendshipId={friend.friendshipId}
-        myId={myId}
-        friendName={friend.display_name || friend.friend_code}
-        onRead={onRead}
-      />
-
       <button
         onClick={() => {
           if (
             confirm(
-              `${friend.display_name || friend.friend_code}님과 친구를 끊을까요? 서로의 습관이 더 이상 보이지 않고, 주고받은 메시지도 삭제돼요. (진행 중이던 챌린지 습관과 기록은 각자에게 남아요)`
+              `${friend.display_name || friend.friend_code}님과 친구를 끊을까요? 서로의 습관이 더 이상 보이지 않아요. (진행 중이던 챌린지 습관과 기록은 각자에게 남아요)`
             )
           ) {
             onUnfriend()

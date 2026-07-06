@@ -1,4 +1,4 @@
-export default function BottomNav({ tab, setTab, onLogout, hasUnread }) {
+export default function BottomNav({ tab, setTab }) {
   const items = [
     { key: 'home', label: '홈', icon: HomeIcon },
     { key: 'notes', label: '메모', icon: NoteIcon },
@@ -17,9 +17,6 @@ export default function BottomNav({ tab, setTab, onLogout, hasUnread }) {
               tab === key ? 'text-ink' : 'text-ink/35'
             }`}
           >
-            {key === 'friends' && hasUnread && (
-              <span className="absolute top-1 right-3 w-2 h-2 rounded-full bg-rose-400" />
-            )}
             <Icon active={tab === key} />
             <span className="text-[11px]">{label}</span>
           </button>

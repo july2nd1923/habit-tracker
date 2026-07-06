@@ -3,6 +3,8 @@ import { supabase } from '../supabaseClient'
 
 export default function SettingsPage({
   habits,
+  profile,
+  onUpdateDisplayName,
   pausesByHabit = {},
   onDeleteHabit,
   onArchiveHabit,
@@ -30,7 +32,10 @@ export default function SettingsPage({
   return (
     <div className="px-5 pt-6 pb-24 max-w-md mx-auto">
       <h1 className="font-display text-2xl text-ink mb-1">설정</h1>
-      <p className="text-xs text-ink/40 mb-6">{userEmail}</p>
+      <p className="text-xs text-ink/40 mb-4">{userEmail}</p>
+
+      <h2 className="text-xs text-ink/50 mb-2">내 프로필</h2>
+      <NameEditor profile={profile} onSave={onUpdateDisplayName} />
 
       <h2 className="text-xs text-ink/50 mb-1">진행중인 할일</h2>
       <p className="text-[11px] text-ink/35 mb-2">화살표로 순서를 바꾸면 홈 화면에도 그대로 반영돼요.</p>
@@ -185,6 +190,50 @@ export default function SettingsPage({
       >
         로그아웃
       </button>
+    </div>
+  )
+}
+
+function NameEditor({ profile, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+
+  function start() {
+    setValue(profile?.display_name || '')
+    setEditing(true)
+  }
+  function save() {
+    onSave(value)
+    setEditing(false)
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-ink/5 shadow-soft px-4 py-3 flex items-center gap-3 mb-6">
+      {editing ? (
+        <>
+          <input
+            autoFocus
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') save()
+              if (e.key === 'Escape') setEditing(false)
+            }}
+            placeholder="친구에게 보일 이름"
+            className="flex-1 text-sm border border-ink/15 rounded-md px-2 py-1 outline-none focus:ring-2 focus:ring-[#A3CBEA]"
+          />
+          <button onClick={save} className="text-xs text-ink font-medium">저장</button>
+          <button onClick={() => setEditing(false)} className="text-xs text-ink/30">취소</button>
+        </>
+      ) : (
+        <>
+          <div className="flex-1">
+            <p className="text-sm text-ink">{profile?.display_name || '(이름 없음)'}</p>
+            <p className="text-[11px] text-ink/35">친구에게 보이는 이름이에요 · 내 코드: {profile?.friend_code || '...'}</p>
+          </div>
+          <button onClick={start} className="text-xs text-ink/40 hover:text-ink transition">이름수정</button>
+        </>
+      )}
     </div>
   )
 }

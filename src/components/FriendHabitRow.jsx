@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import confetti from 'canvas-confetti'
 import { computeMonthStats, yearMonthKey } from '../lib/dateUtils'
 import { supabase } from '../supabaseClient'
+import HabitComments from './HabitComments'
 
 const REACTION_EMOJIS = ['👏', '🔥', '🎉']
 
@@ -102,6 +103,8 @@ export default function FriendHabitRow({ habit, logs, pauses = [], year, month, 
           </button>
         ))}
       </div>
+
+      <HabitComments habitId={habit.id} year={year} month={month} myId={myId} />
     </div>
   )
 }
