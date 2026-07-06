@@ -1,6 +1,7 @@
 export default function BottomNav({ tab, setTab }) {
   const items = [
     { key: 'home', label: '홈', icon: HomeIcon },
+    { key: 'timetable', label: '일정', icon: ClockIcon },
     { key: 'notes', label: '메모', icon: NoteIcon },
     { key: 'friends', label: '친구', icon: FriendsIcon },
     { key: 'settings', label: '설정', icon: SettingsIcon },
@@ -31,6 +32,14 @@ function HomeIcon({ active }) {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.2 : 1.8}>
       <path d="M3 10.5 12 3l9 7.5" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+function ClockIcon({ active }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.2 : 1.8}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3.5 2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   )
 }
