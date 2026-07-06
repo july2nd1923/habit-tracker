@@ -19,7 +19,6 @@ export default function App() {
   const [habits, setHabits] = useState([])
   const [logsByHabit, setLogsByHabit] = useState({})
   const [pausesByHabit, setPausesByHabit] = useState({})
-  const [unreadByFriendship, setUnreadByFriendship] = useState({})
   const [year, setYear] = useState(today.getFullYear())
   const [month, setMonth] = useState(today.getMonth())
   const [showAdd, setShowAdd] = useState(false)
@@ -88,28 +87,6 @@ export default function App() {
     setPausesByHabit(grouped)
   }, [])
 
-  const loadUnread = useCallback(async () => {
-    if (!profile) return
-    const { data: fr } = await supabase
-      .from('friendships')
-      .select('id')
-      .eq('status', 'accepted')
-      .or(`requester_id.eq.${profile.id},addressee_id.eq.${profile.id}`)
-    const ids = (fr || []).map((f) => f.id)
-    if (!ids.length) {
-      setUnreadByFriendship({})
-      return
-    }
-    const { data } = await supabase
-      .from('friend_messages')
-      .select('friendship_id')
-      .in('friendship_id', ids)
-      .is('read_at', null)
-      .neq('sender_id', profile.id)
-    const map = {}
-    for (const r of data || []) map[r.friendship_id] = (map[r.friendship_id] || 0) + 1
-    setUnreadByFriendship(map)
-  }, [profile])
 
   useEffect(() => {
     if (session) {
@@ -126,9 +103,6 @@ export default function App() {
     }
   }, [habits, year, month, session, loadLogs, loadPauses])
 
-  useEffect(() => {
-    if (profile) loadUnread()
-  }, [profile, tab, loadUnread])
 
   async function handleAddHabit({ title, color }) {
     const { data: userData } = await supabase.auth.getUser()
@@ -168,6 +142,13 @@ export default function App() {
     if (!trimmed) return
     setHabits((prev) => prev.map((h) => (h.id === id ? { ...h, title: trimmed } : h)))
     await supabase.from('habits').update({ title: trimmed }).eq('id', id)
+  }
+
+  async function handleUpdateDisplayName(name) {
+    const trimmed = name.trim()
+    if (!trimmed || !profile) return
+    setProfile((p) => ({ ...p, display_name: trimmed }))
+    await supabase.from('profiles').update({ display_name: trimmed }).eq('id', profile.id)
   }
 
   async function handleTogglePause(habit) {
@@ -283,6 +264,7 @@ export default function App() {
         <HomePage
           habits={visibleHabits}
           allHabits={habits}
+          myId={profile?.id}
           logsByHabit={logsByHabit}
           pausesByHabit={pausesByHabit}
           year={year}
@@ -307,17 +289,12 @@ export default function App() {
           onConsumeInitial={() => setNoteTargetId(null)}
         />
       )}
-      {tab === 'friends' && (
-        <FriendsPage
-          profile={profile}
-          today={today}
-          unreadByFriendship={unreadByFriendship}
-          onUnreadRefresh={loadUnread}
-        />
-      )}
+      {tab === 'friends' && <FriendsPage profile={profile} today={today} />}
       {tab === 'settings' && (
         <SettingsPage
           habits={habits}
+          profile={profile}
+          onUpdateDisplayName={handleUpdateDisplayName}
           pausesByHabit={pausesByHabit}
           onDeleteHabit={handleDeleteHabit}
           onArchiveHabit={handleArchiveHabit}
@@ -329,11 +306,7 @@ export default function App() {
         />
       )}
 
-      <BottomNav
-        tab={tab}
-        setTab={setTab}
-        hasUnread={Object.values(unreadByFriendship).some((n) => n > 0)}
-      />
+      <BottomNav tab={tab} setTab={setTab} />
 
       {showAdd && <AddHabitModal onClose={() => setShowAdd(false)} onAdd={handleAddHabit} />}
     </div>
