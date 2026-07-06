@@ -94,14 +94,13 @@ export function computeStreakWithRest(doneDates, restDates, year, month, today, 
 }
 
 // 달 성취율 계산 (쉬어가기/휴식 날은 분모/분자 모두에서 제외)
+// 습관을 만든 달은 1일부터 전부 열려있음 (일 단위 잠금 없음)
 export function computeMonthStats(habit, doneDates, restDates, year, month, today, pauses = []) {
   const total = daysInMonth(year, month)
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month
   const elapsedDays = isCurrentMonth ? today.getDate() : total
 
-  const created = habit.created_at ? new Date(habit.created_at) : null
-  const isCreationMonth = created && created.getFullYear() === year && created.getMonth() === month
-  const startDay = isCreationMonth ? created.getDate() : 1
+  const startDay = 1
 
   const doneSet = new Set(doneDates)
   const restSet = new Set(restDates)
