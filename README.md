@@ -110,87 +110,21 @@ git push -u origin main
 
 친구의 습관 목록에서, 그 습관이 챌린지로 진행 중이면 🤝 표시가 뜨지만 **누구와 함께하는지는 표시되지 않아요**.
 
-## 이번 업데이트에 추가된 기능
+## 최근 업데이트 (2026-07)
 
-- **친구 끊기**: 친구 상세 화면 맨 아래 "친구 끊기" 버튼. 서로의 습관이 안 보이게 되고 메시지도 삭제돼요. 챌린지 습관과 기록은 각자에게 남아요.
-- **챌린지 거절/종료 알림**: 상대가 초대를 거절하거나 챌린지를 그만두면, 내 습관 카드에 그 사실이 표시되고 "일반 습관으로 계속하기" 버튼으로 전환할 수 있어요.
-- **챌린지 그만하기**: 진행 중인 챌린지 카드에서 "챌린지 그만하기"를 누르면 함께 보기만 종료돼요 (습관·기록은 유지, 상대에게도 종료 안내 표시).
-- **새 메시지 표시**: 안 읽은 메시지가 있으면 하단 친구 탭에 빨간 점, 친구 목록에 숫자 뱃지가 떠요.
-- **읽음 표시**: 내가 보낸 메시지를 상대가 읽으면 마지막 읽은 메시지 아래 "읽음"이 표시돼요.
-- **장기 휴식(🌙)**: 설정에서 습관별 "휴식" 버튼. 아프거나 여행 등으로 오래 쉴 때 사용해요. 휴식 기간의 날들은 성공/실패 계산에서 완전히 빠지고 연속 기록도 안 끊겨요. "휴식끝"을 누르면 그날부터 다시 시작돼요. (쉬어가기 💤와 달리 횟수 제한이 없고, 기간 단위로 동작해요)
-- **완주 축하**: 이번 달을 100%로 채우면 색종이 효과와 함께 🏆 완주 배너가 떠요. 친구 화면에서도 완주한 습관에 "🎉 축하하기" 버튼이 나타나 한 번에 축하를 보낼 수 있어요.
-- **📅 연간 보기**: 홈 화면 오른쪽 위 "연간" 버튼을 누르면, 습관별로 1년 전체가 히트맵(잔디밭)으로 보여요. 완료한 날은 색으로, 쉬어가기/휴식은 다르게 표시되고, 보관한 습관의 기록도 함께 나와요. 연도 이동도 가능해요.
+- **⚠️ 중요 버그 수정**: 체크가 저장 안 되고 0%로 초기화되던 문제. 원인은 지난 마이그레이션 SQL이 중간에 에러로 멈춰서 DB에 필요한 컬럼이 안 생긴 것 → `supabase/migration_fix.sql`을 실행하면 해결돼요 (몇 번을 다시 실행해도 안전하게 작성됨).
+- **생성한 달 전체 오픈**: 6월 10일에 만든 습관도 6월 1일부터 체크 가능 (일 단위 잠금 제거).
+- **카드 접기/펼치기**: 각 습관 카드 왼쪽 화살표로 접을 수 있어요. 접힌 상태에선 한 줄(이름 + 🔥스트릭 + % + 오늘 체크 버튼)만 보여서 습관이 많아도 한눈에 들어와요. 접힘 상태는 기기별로 기억돼요.
+- **내 이름 변경**: 설정 → 내 프로필에서 친구에게 보이는 이름을 바꿀 수 있어요 (기본값은 이메일 앞부분).
+- **습관 댓글 (메시지 대체)**: 친구가 공개한 습관 아래 💬 댓글을 남길 수 있어요. 댓글은 그 달에 귀속돼요 (6월에 단 댓글은 6월 화면에서만 보임). 그 습관을 볼 수 있는 사람은 누구의 댓글이든 볼 수 있어요 — 내 친구 A가 단 댓글을, A와 친구가 아닌 내 친구 B도 볼 수 있어요. 내 습관에 달린 댓글은 내 카드에서도 보이고 답글도 달 수 있어요.
+- **메시지 기능 제거**: 댓글로 대체되어 기존 1:1 메시지는 없어졌어요.
 
-## 이미 배포한 앱에 이번 업데이트 반영하기
+## 이미 배포한 앱에 반영하기
 
-1. **Supabase SQL Editor**에서 아래 SQL 실행:
-
-```sql
--- 메시지 읽음 처리
-alter table friend_messages add column if not exists read_at timestamptz;
-
-create policy "friend_messages: participants can update" on friend_messages
-  for update using (
-    exists (
-      select 1 from friendships f
-      where f.id = friend_messages.friendship_id
-        and (f.requester_id = auth.uid() or f.addressee_id = auth.uid())
-    )
-  ) with check (
-    exists (
-      select 1 from friendships f
-      where f.id = friend_messages.friendship_id
-        and (f.requester_id = auth.uid() or f.addressee_id = auth.uid())
-    )
-  );
-
--- 챌린지 종료 상태 허용
-alter table challenges drop constraint if exists challenges_status_check;
-alter table challenges add constraint challenges_status_check
-  check (status in ('pending', 'accepted', 'declined', 'ended'));
-
--- 장기 휴식
-create table if not exists habit_pauses (
-  id uuid primary key default uuid_generate_v4(),
-  habit_id uuid references habits(id) on delete cascade not null,
-  start_date date not null,
-  end_date date,
-  created_at timestamptz default now()
-);
-
-alter table habit_pauses enable row level security;
-
-create policy "habit_pauses: owner full access" on habit_pauses
-  for all using (
-    exists (select 1 from habits where habits.id = habit_pauses.habit_id and habits.user_id = auth.uid())
-  ) with check (
-    exists (select 1 from habits where habits.id = habit_pauses.habit_id and habits.user_id = auth.uid())
-  );
-
-create policy "habit_pauses: friends can view shared" on habit_pauses
-  for select using (
-    exists (
-      select 1 from habits h
-      where h.id = habit_pauses.habit_id
-        and h.visibility = 'friends'
-        and is_friend(auth.uid(), h.user_id)
-    )
-  );
-```
-
-2. 이번엔 **`package.json`도 바뀌었어요** (색종이 효과 라이브러리 추가). GitHub에서:
-   - 기존 `src` 폴더 통째로 삭제 → 이 zip의 `src` 폴더 새로 업로드
-   - 루트의 `package.json` 파일도 이 zip의 것으로 교체 (파일 열어서 연필 아이콘 → 전체 삭제 → 새 내용 붙여넣기, 또는 Upload files로 덮어쓰기)
-3. Commit 하면 Vercel이 자동으로 재배포해요.
-
-
-
-## 친구 공개 기능 설계 메모 (나중에 참고용)
-
-- 습관 하나하나 "누구에게 공개할지" 고르는 대신, **친구 관계를 한 번 맺으면 그 친구에게는 "친구공개"로 설정한 모든 습관이 보이는 방식**이에요. 매번 대상 고르는 번거로움 없이 쓸 수 있게 한 선택이에요.
-- 친구 코드는 랜덤 5자리(예: `7K3M9`)라 유추가 어렵고, 코드를 안다고 바로 아무나 볼 수 있는 게 아니라 상대가 **수락해야만** 성립돼요.
-- 메모는 습관 공개 여부와 무관하게 항상 본인만 볼 수 있도록 설계했어요. 나중에 메모도 공유하고 싶어지면 말씀해주세요, `habit_notes` 테이블에 정책 하나만 추가하면 돼요.
-- 새 계정을 Supabase에서 추가해도 코드는 자동으로 생기고(DB 트리거), 코드를 다시 손댈 필요 없어요.
+1. **Supabase SQL Editor에서 `supabase/migration_fix.sql` 전체 실행** (★ 이것만 하면 저장 안 되던 버그도 해결)
+2. GitHub에서 기존 `src` 폴더 삭제 → 이 zip의 `src` 폴더 업로드
+3. `package.json`도 이전에 교체 안 했다면 교체
+4. Commit → Vercel 자동 재배포
 
 ## 자주 하는 실수 (미리 알아두면 편해요)
 
