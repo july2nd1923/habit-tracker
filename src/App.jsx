@@ -8,6 +8,7 @@ import NotesPage from './components/NotesPage'
 import SettingsPage from './components/SettingsPage'
 import FriendsPage from './components/FriendsPage'
 import AddHabitModal from './components/AddHabitModal'
+import TimetablePage from './components/TimetablePage'
 
 const today = new Date()
 const REST_LIMIT_PER_MONTH = 5 // 습관 하나당 한 달에 쉬어가기 가능 횟수
@@ -281,6 +282,9 @@ export default function App() {
           onAddClick={() => setShowAdd(true)}
           onRefreshHabits={loadHabits}
         />
+      )}
+      {tab === 'timetable' && (
+        <TimetablePage habits={habits} today={today} myUserId={session.user.id} />
       )}
       {tab === 'notes' && (
         <NotesPage
